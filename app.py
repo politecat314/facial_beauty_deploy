@@ -296,4 +296,14 @@ def create_interface():
 # Launch the Gradio app
 if __name__ == "__main__":
     demo = create_interface()
-    demo.launch()
+    demo.launch(
+        server_name="0.0.0.0",  # Listen on all interfaces
+        server_port=7860,        # Default Gradio port
+        share=False,             # Don't use Gradio's sharing feature in production
+        auth=None,               # Add authentication if needed: auth=(username, password)
+        ssl_certfile=None,       # Let Nginx handle SSL
+        ssl_keyfile=None,        # Let Nginx handle SSL
+        inbrowser=False,         # Don't open browser automatically
+        debug=False,             # Disable debug mode in production
+        quiet=True               # Less verbose output
+    )
