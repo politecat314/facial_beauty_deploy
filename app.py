@@ -4,14 +4,25 @@ import matplotlib.pyplot as plt
 import cv2
 from PIL import Image
 import io
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+import mediapipe as mp
+import requests
+import os
+import time
+
+if not os.path.exists('history'):
+    os.mkdir('history')
+
+# Load the BlazeFace model for face detection
+base_options = python.BaseOptions(model_asset_path="blaze_face_short_range.tflite")
+options = vision.FaceDetectorOptions(base_options=base_options)
+detector = vision.FaceDetector.create_from_options(options)
 
 # Placeholder for face detection and cropping
 def detect_and_crop_face(image):
     """
     Detect faces in the image and crop the first detected face.
-    
-    In a real implementation, you would replace this with your actual face detection
-    algorithm (e.g., using OpenCV, MTCNN, or a deep learning model).
     
     Args:
         image: PIL Image object
@@ -20,46 +31,40 @@ def detect_and_crop_face(image):
         - cropped_face: The cropped face image or None if no face detected
         - face_detected: Boolean indicating if a face was detected
     """
+    # save the image to history folder with current timestamp
+    timestamp = int(time.time())
+    image.save(f'history/{timestamp}.jpg')
+
     # Convert PIL Image to OpenCV format
     img_cv = np.array(image)
+
+
     if len(img_cv.shape) == 3 and img_cv.shape[2] == 4:  # RGBA
         img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGBA2RGB)
     
-    # ===== PLACEHOLDER: Replace with your actual face detection code =====
-    # This is where you would implement your face detection logic
-    # For this demo, we'll simulate face detection with a random outcome
+    # Convert to MediaPipe Image format
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_cv)
     
-    # In your real implementation, you would detect faces here
-    # Example with a face detector like this:
-    # face_detector = YourFaceDetectorModel()
-    # faces = face_detector.detect(img_cv)
-    # face_detected = len(faces) > 0
+    # Face detection
+    detection_result = detector.detect(mp_image)
     
-    # Simulating detection for demo purposes only - replace this!
-    face_detected = True  # Set to True for demo, replace with your actual detection logic
+    # Check if faces were detected
+    face_detected = len(detection_result.detections) > 0
     
     if face_detected:
-        # In your real implementation, you would use the coordinates from your face detector
-        # Example: face_coords = faces[0]  # Get first detected face
-        # cropped_face = img_cv[face_coords.y1:face_coords.y2, face_coords.x1:face_coords.x2]
-        
-        # Simulating cropping for demo purposes only - replace this!
-        h, w = img_cv.shape[:2]
-        crop_size = min(h, w) // 2
-        center_y, center_x = h // 2, w // 2
-        
-        y1 = max(0, center_y - crop_size // 2)
-        y2 = min(h, center_y + crop_size // 2)
-        x1 = max(0, center_x - crop_size // 2)
-        x2 = min(w, center_x + crop_size // 2)
-        
-        cropped_face = img_cv[y1:y2, x1:x2]
+        detection = detection_result.detections[0]
+        bbox = detection.bounding_box
+
+        cropped_face = img_cv[bbox.origin_y:bbox.origin_y + bbox.height,
+                              bbox.origin_x:bbox.origin_x + bbox.width]
+    
         # Convert back to PIL for Gradio
         cropped_face = Image.fromarray(cropped_face)
     else:
         cropped_face = None
     
     return cropped_face, face_detected
+
 
 # Placeholder for beauty score prediction
 def predict_beauty_score(face_image):
@@ -77,26 +82,37 @@ def predict_beauty_score(face_image):
         - std_dev: Standard deviation of the score
         - probabilities: Probabilities for each score from 1-5
     """
-    # ===== PLACEHOLDER: Replace with your actual beauty score prediction model =====
-    # For this demo, we'll generate plausible random probabilities
-    # In your real implementation, this would be your model's output
-    
-    # Example:
-    # beauty_model = YourBeautyModel()
-    # probabilities = beauty_model.predict(face_image)
-    
-    # Generating sample probabilities for demo purposes - replace this!
-    raw_probs = np.array([0.1, 0.2, 0.4, 0.2, 0.1])  # Example distribution
-    probabilities = raw_probs / np.sum(raw_probs)
+    if isinstance(face_image, Image.Image):
+        face_image_np = np.array(face_image)
+        # Convert RGBA to RGB if needed
+        if len(face_image_np.shape) == 3 and face_image_np.shape[2] == 4:
+            face_image_np = cv2.cvtColor(face_image_np, cv2.COLOR_RGBA2RGB)
+    else:
+        # Assume it's already a numpy array
+        face_image_np = face_image
+
+
+    _, img_encoded = cv2.imencode('.jpg', face_image_np)
+
+    # Convert to BytesIO object
+    img_bytes = io.BytesIO(img_encoded.tobytes())
+
+    # Prepare files dictionary for requests
+    files = {'image': ('image.jpg', img_bytes, 'image/jpeg')}
+
+    # Send request
+    url = 'http://localhost:5001/predict'
+    response = requests.post(url, files=files)
+    prediction = np.array(response.json()['prediction'])
     
     # Calculate the weighted score (expected value)
     scores = np.array([1, 2, 3, 4, 5])
-    weighted_score = np.sum(probabilities * scores)
+    weighted_score = np.sum(prediction * scores)
     
     # Calculate standard deviation
-    std_dev = np.sqrt(np.sum(probabilities * (scores - weighted_score) ** 2))
+    std_dev = np.sqrt(np.sum(prediction * (scores - weighted_score) ** 2))
     
-    return weighted_score, std_dev, probabilities
+    return weighted_score, std_dev, prediction
 
 # Create a bar plot for the beauty score probabilities
 def create_probability_plot(probabilities):
